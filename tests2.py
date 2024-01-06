@@ -1,5 +1,3 @@
-a = [1,2,3]
-b = ['a','b','c']
+import numpy as np
 
-for x,y in zip(a,b):
-    print(x,y)
+print (np.linspace(0, 1,10+1))
