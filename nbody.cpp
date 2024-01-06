@@ -163,7 +163,7 @@ public:
         Vector r12 = other.p - p;
         double r = r12.dist();
         double force = G * mass * other.mass / (r*r + eps*eps);
-        if (r==0) std::cout << "r=0 for particles " << *this << " and " << other << std::endl;
+        if (r==0) std::cerr << "r=0 for particles " << *this << " and " << other << std::endl;
         return force * r12/r;
     }
 
@@ -364,11 +364,13 @@ doubles computePoissonErrors(const doubles& shells, const doubles& lambdas) {
 /** @brief calculate number of particles within the half-mass radius */
 double getHmNr(const Particles& particles) {
 
-    Particles& sorted = const_cast<Particles&>(particles);
+    Particles sorted(particles);
 
     std::sort(sorted.begin(), sorted.end(), [](const Particle& p1, const Particle& p2) {
         return p1.getDist() < p2.getDist();
     });
+
+
 
     // TODO could store the sorted sequence!
 
@@ -408,6 +410,7 @@ double getSoftening(const Particles& particles) {
 /** @brief calculates the direct forces in `O(n^2)`*/
 Vectors getDirectForces(const Particles& particles, double softeningMultiplier=1, bool print=true) {
     double softening = getSoftening(particles)*softeningMultiplier;
+
     if (print) {
         std::cout << "|";
         std::cout.flush();
@@ -482,7 +485,6 @@ Range Range::getChildRange(int quadrant) const {
 }
     
 double Range::openingAngle(Vector p) const {
-    // return 0;                                                       // ! remove
     if (contains(p)) return 2*M_PI;
 
     // approximative, but fast solution
@@ -611,24 +613,22 @@ Treeparticle computeTreeCodeMasses(Tree* tree) {                // could be made
 }
 
 Vector getForceRec(const Particle& p, const Tree* tree, double angle, double eps) {
-    if (tree->treeParticle.getMass() == 0) {
-        // std::cout << "r=0 for particles " << p << " and " << tree->treeParticle << std::endl;
-        // std::cout << tree->getRange().openingAngle(p.getP()) << std::endl;
-        return Vector{0,0,0};
-    }
+    if (tree->treeParticle.getMass() == 0) return Vector{0,0,0};
+
     if (tree->getRange().openingAngle(p.getP()) > angle) {
         Vector force{0,0,0};
         if (tree->getType() == NodeType::LEAF) {
             const Leaf* leaf = dynamic_cast<const Leaf*>(tree);
             for (const auto& p2 : leaf->getParticles()) {
-                if (p == *p2) continue;
+                if (p == *p2) {
+                    continue;
+                }
                 force += p.getForceTo(*p2, eps);
             }
         } else {
             const Node* node = dynamic_cast<const Node*>(tree);
             for (int i=0; i<8; i++) {
                 force += getForceRec(p, node->getChild(i), angle, eps);
-                // std::cout << "Force from particle " << p << " to range " << node->getChild(i)->getRange() << ": " << force << std::endl;
             }
         }
         return force;
@@ -678,18 +678,12 @@ void compareForces(const Vectors& v1, const Vectors& v2) {
     for (uint i=0; i<v1.size(); i++) {
         Vector diff = v1[i] - v2[i];
         double sumi = (v1[i].dist() + v2[i].dist()) / 2;
-        // if (diff.dist() > sumi * 1e-1) {
+        // if (diff.dist() > sumi * 1e-2 && diff.dist() > 1e-10) {
         //     std::cout << "Difference in force for particle " << i << ": " << diff << " bigger than 1e-2 of " << v1[i] << ", " << v2[i] << std::endl;
         //     std::cout << "Namely: " << diff.dist() << " > " << sumi * 1e-2 << std::endl;
         // }
-        // // if (diff.dist() > 1e-2) {
-        // //     std::cout << "Difference in force for particle " << i << ": " << diff << std::endl;
-        // // }
-        // if (i==0) {
 
-        //     std::cout << sum << " " << sumDiff << std::endl;
-        //     std::cout << v1[i] << std::endl << v2[1] << std::endl << diff << std::endl;
-        // }
+
         sum += sumi;
         sumDiff += diff.dist();
     }
@@ -749,7 +743,7 @@ int main() {
     - total particle mass is 10 in datasets data0, data1
     */
 
-    string dataname = "data0";
+    string dataname = "data";
     string dataset = dataname + ".txt";
     Particles particles = readIn(dataset);
 
@@ -818,7 +812,7 @@ int main() {
 
     root = getTree(particles);        // root needs to be deleted!
     computeTreeCodeMasses(root);
-    treeTest(root);
+    // treeTest(root);
 
     // Vectors v5 = getTreeCodeForces(particles, root, 0, 1);
     // Vectors v5_ = getTreeCodeForces(particles, root, 0, .3);
@@ -833,11 +827,24 @@ int main() {
     // std::cout << "Comparing forces for eps=0,ang=.1 "; compareForces(v1, v5__);
     // std::cout << "Comparing forces for eps=1,ang=.1 "; compareForces(v3, v7_);
 
-    Vectors cd1 = getDirectForces(particles, 1);
-    Vectors ct101 = getTreeCodeForces(particles, root, 1, .1, false);
-    Vectors ct11 = getTreeCodeForces(particles, root, 1, 1, false);
-    Vectors ct110 = getTreeCodeForces(particles, root, 1, 10, false);
-    std::cout << "Comparing forces for eps=1,ang=.1 " << std::endl; compareForces(cd1, ct101);
+
+
+
+    // Vectors cd1 = timeit("getDirectForces", getDirectForces, particles, 1, true);
+    Vectors cd1; loadVectorsFromFile(cd1, "bin_"+dataname+"_vectors-directforce-1.bin");
+
+    // Vectors ct101 = timeit("getTreeCodeForces-1-.1", getTreeCodeForces, particles, root, 1, .1, false);
+    // std::cout << "Comparing forces for eps=1,ang=.1 " << std::endl; compareForces(cd1, ct101);
+
+    Vectors ct11 = timeit("getTreeCodeForces-1-1", getTreeCodeForces,particles, root, 1, 1, true);
+    std::cout << "Comparing forces for eps=1,ang=1 " << std::endl; compareForces(cd1, ct11);
+
+
+
+
+
+
+
 
 
     if (root != nullptr) delete root;
