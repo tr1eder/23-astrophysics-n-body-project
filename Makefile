@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CXX = g++
-CXXFLAGS = -Wall
+CXXFLAGS = -Wall -O2
 
 # Executable name
 EXECUTABLE = nbody
@@ -22,7 +22,10 @@ $(EXECUTABLE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 run: $(EXECUTABLE)
-	./$(EXECUTABLE)
+	./$(EXECUTABLE) $(filter-out $@,$(MAKECMDGOALS))
 
 clean:
 	rm -f $(OBJECTS) $(EXECUTABLE)
+
+%:
+	@:

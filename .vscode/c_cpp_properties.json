@@ -15,7 +15,11 @@
             "compilerPath": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.38.33130/bin/Hostx64/x64/cl.exe",
             "cStandard": "c17",
             "cppStandard": "c++17",
-            "intelliSenseMode": "windows-msvc-x64"
+            "intelliSenseMode": "windows-msvc-x64",
+            "compilerArgs": [
+                "-O3",  // Set optimization level to O2
+                "/arch:AVX2" // Enable AVX2 instructions
+            ]
         }
     ],
     "version": 4
