@@ -23,6 +23,23 @@ $(EXECUTABLE): $(OBJECTS)
 
 run: $(EXECUTABLE)
 	./$(EXECUTABLE) $(filter-out $@,$(MAKECMDGOALS))
+# run: $(EXECUTABLE)
+# 	./$(EXECUTABLE) $(MAKECMDGOALS)
+
+# d = 3
+
+# run: $(EXECUTABLE)
+# 	./$(EXECUTABLE) $(d)
+
+# run ./prog
+
+
+# run: $(EXECUTABLE)
+# 	./$(EXECUTABLE) $(filter-out $@,$(MAKECMDGOALS)) $(filter-out $(filter-out $@,$(MAKECMDGOALS)),$(MAKECMDGOALS))
+
+# run: $(EXECUTABLE)
+# 	./$(EXECUTABLE) $(filter-out $@,$(MAKECMDGOALS)) "$(filter-out $@,$(MAKECMDGOALS))"
+
 
 clean:
 	rm -f $(OBJECTS) $(EXECUTABLE)

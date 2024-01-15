@@ -1,28 +1,22 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
-def plotFromFile(filename):
-    with open(filename) as f:
-        lines = f.readlines()
+# Create some sample data (negative values)
+x = np.linspace(-10, -1, 100)
+y = -np.log10(-x)  # Working with the absolute values for logarithmic scale
 
-    boundaries =    np.array(lines[0].split(), dtype=float)[:]
-    midpoints  =    np.array(lines[1].split(), dtype=float)[:]
-    computed   =    np.array(lines[2].split(), dtype=float)[:]
-    rhos       =    np.array(lines[3].split(), dtype=float)[:]
-    errs       =    np.array(lines[4].split(), dtype=float)[:]
+# Create a plot
+fig, ax = plt.subplots()
+ax.plot(x, y)
 
-    errorbars  =    lambda y : np.sqrt(y) ## one standard deviation
+# Set the y-axis scale to logarithmic
+ax.set_yscale('log')
 
-    plt.errorbar(midpoints, rhos, yerr=errorbars(rhos), fmt='o', label='rho w.errorbars') 
-    plt.plot(midpoints, computed, label='shells')
-    for x,y,err in zip(midpoints, computed, errs):
-        plt.annotate('{:.1f}σ'.format(err), (x,y), textcoords="offset points", xytext=(3,5), ha='center')
+# Adjust the y-axis tick labels to reflect the original signs
+yticks = [-10**i for i in range(1, 11)]
+yticklabels = [f'-10^{i}' for i in range(1, 11)]
+ax.set_yticks(yticks)
+ax.set_yticklabels(yticklabels)
 
-
-    plt.yscale('log')
-    # plt.ylim(0, 50)
-    plt.legend()
-    plt.show()
-
-
-plotFromFile("myplot.txt")
+# Show the plot
+plt.show()

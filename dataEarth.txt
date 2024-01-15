@@ -1,0 +1,3 @@
+ID	M	x	y	z	vx	vy	vz	softening	potential
+0	333029.7042965742	0	0	0	0	0	0	0	0
+1	1	1	0	0	0	577.8834200807	0	0	0
