@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CXX = g++
-CXXFLAGS = -Wall -O2
+CXXFLAGS = -Wall -O3
 
 # Executable name
 EXECUTABLE = nbody

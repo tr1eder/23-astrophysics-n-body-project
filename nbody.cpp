@@ -13,8 +13,7 @@
 #include <iterator>
 #include <chrono>
 #include <iomanip>
-// #include <corecrt_math_defines.h>
-// #include "test"
+#include <random>
 // #include "matplotlibcpp.h"
 
 typedef unsigned int uint;
@@ -23,7 +22,6 @@ typedef unsigned int uint;
 using std::chrono::high_resolution_clock;
 using std::chrono::duration_cast;
 using std::chrono::microseconds;
-// using std::chrono::milliseconds;
 using std::to_string;
 using std::string;
 using std::stringstream;
@@ -70,6 +68,9 @@ void runPython(string filename);
 void boxedPrint(stringstream& ss); 
 void boxedPrint(string s);
 void paddedPrint(string s="", char fill='-', char end='|', int padLen=printSize);
+template <typename... Args>
+double max(double first, Args... ds);
+
 
 
 
@@ -112,9 +113,6 @@ struct Vector {
     double x, y, z;
 
     double dist() const {
-        // std::cout << "dist: " << sqrt(x*x + y*y + z*z) << std::endl;
-        // std::cout << "x: " << x << " y: " << y << " z: " << z << std::endl;
-        // std::cout << "squared: " << x*x + y*y + z*z << std::endl;
         return sqrt(x*x + y*y + z*z);
     }
     Vector operator+(const Vector& other) const {
@@ -165,15 +163,16 @@ protected:
     static double totalMass;
     static int idCount;
     static bool sorted;
-    // // static Particles sortedParticles; // ! reset when particles moved
 
-    int id;
     double mass;
     Point p;
     Velocity v;
     bool central;
 public: 
+    int id;
+    Vector force;
     Particle(int id, double mass, Point p, Velocity v, bool central) : id(id), mass(mass), p(p), v(v), central(central) {
+        force = Vector{0,0,0};
         if (id!=-1) { totalMass += mass; }
         else if (id==-1) { this->id = idCount; } // set unique id for tree particles
         idCount = std::max(idCount, this->id+1);
@@ -189,46 +188,43 @@ public:
     }
 
     Vector getForceTo(const Particle& other, double eps) const {
-        Vector r12 = -other.p + p;
+        Vector r12 = p - other.p;
         double r = r12.dist();
         double force = -G * mass * other.mass / (r*r + eps*eps);
         if (r!=0) return (force/r) * r12;
         else { std::cerr << "r=0 for particles " << *this << " and " << other << std::endl; return Vector{0,0,0}; }
     }
 
+    void setForceTo(Particle& other, double eps) {
+        Vector force = getForceTo(other, eps);
+        this->force += force;
+        other.force -= force;
+    }
+
     void setApplyForce(const Vector& force, double dt) {
         sorted = false;
-
-        // v += force/mass * dt;
-        // p += v * dt;
-        // or
         std::cout << "ID: " << id << "  Force: " << force << std::endl;
         Vector a = force/mass;
         p += v * dt + a * (dt*dt/2);
         v += a * dt;
-        // or leapFrog
-        // Vector f1{0,0,0}; // calculateForce(); -- can be omitted for speed
-        // v += f1/mass * (dt/2);
-        // p += v * dt;
-        // Vector f2{0,0,0}; // calculateForce(); -- must be left here
-        // v += f2/mass * (dt/2);
-
-
         throw std::runtime_error("Not implemented yet");
-        
     }
 
     void setApplyLeapFrog1(const Vector& force, double dt) {
+        sorted = false;
         v += force/mass * (dt/2);
         p += v * dt;
     }
     void setApplyLeapFrog2(const Vector& force, double dt) {
+        sorted = false;
         v += force/mass * (dt/2);
     }
 
     double getDist() const { return p.dist(); }
+    double getDist(const Particle& other) const { return (p-other.p).dist(); }
     double getMass() const { return mass; }
     Point getP() const { return p; }
+    Velocity getV() const { return v; }
     int getId() const { return id; }
 
 
@@ -243,21 +239,16 @@ public:
     static double maxDistance(const Particles& particles) {
         if (!sorted) throw std::runtime_error("Particles not sorted");
         return particles.back().getDist();
-        // // double max = 0;
-        // // for (const auto& p : particles) {
-        // //     max = std::max(max, p.getDist());
-        // // }
-        // // return max;
     }
 
     /** need to be sorted again after every iteration of a full gravity tree solver scheme */
     static void sortParticles(Particles& particles) {
         if (sorted) return;
-        // sortedParticles = particles;
         std::sort(particles.begin(), particles.end(), [](const Particle& p1, const Particle& p2) {
             return p1.getDist() < p2.getDist();
         });
         sorted = true;
+        // for (uint i=0; i<particles.size(); i++) particles[i].id = i;
     }
 
     static bool isSorted() {
@@ -293,14 +284,21 @@ private:
     double xmin, xmax;
     double ymin, ymax;
     double zmin, zmax;
+    Vector mid;
+    double size;
 
 public:
-    Range(double xmin, double xmax, double ymin, double ymax, double zmin, double zmax) : xmin(xmin), xmax(xmax), ymin(ymin), ymax(ymax), zmin(zmin), zmax(zmax) {}
+    Range(double xmin, double xmax, double ymin, double ymax, double zmin, double zmax) : xmin(xmin), xmax(xmax), ymin(ymin), ymax(ymax), zmin(zmin), zmax(zmax) {
+        mid = Vector{(xmin+xmax)/2, (ymin+ymax)/2, (zmin+zmax)/2};
+        size = std::max({xmax-xmin, ymax-ymin, zmax-zmin});
+    }
     bool contains(const Vector& p) const { return xmin <= p.x && p.x <= xmax && ymin <= p.y && p.y <= ymax && zmin <= p.z && p.z <= zmax; }
     int getQuadrant(const Vector& p) const { return (p.x > (xmin+xmax)/2) + 2*(p.y > (ymin+ymax)/2) + 4*(p.z > (zmin+zmax)/2); }
     int getQuadrant(const Range& r) const { return (r.xmin != xmin) + 2*(r.ymin != ymin) + 4*(r.zmin != zmin); }
     Range getChildRange(int quadrant) const;
     double openingAngle(Vector p) const;
+    double openingAngle(const Range& other) const;
+    bool operator==(const Range& other) const { return xmin==other.xmin && xmax==other.xmax && ymin==other.ymin && ymax==other.ymax && zmin==other.zmin && zmax==other.zmax; }
 
     static Range containingBox(const Particles& particles);
     friend std::ostream& operator<<(std::ostream& os, const Range& r) { os << "[(" << r.xmin << "," << r.xmax << ") x (" << r.ymin << "," << r.ymax << ") x (" << r.zmin << "," << r.zmax << ")]"; return os; }
@@ -314,27 +312,33 @@ public:
     Treeparticle treeParticle;
     Tree(const Range& range, Node* parent) : range(range), parent(parent) {}
     Range getRange() const { return range; }
+    bool operator==(const Tree& other) const { return treeParticle == other.treeParticle; }
+    bool operator!=(const Tree& other) const { return !(*this == other); }
 
     virtual ~Tree() = default;
-    virtual bool add(const Particle& p) = 0;
+    virtual bool add(Particle& p) = 0;
     virtual NodeType getType() const = 0;
     virtual void print(std::ostream& os) const = 0;
-    
+    virtual void getForce(Tree* other, double angle, double eps) = 0;
+    virtual void applyForce(const Vector& force) const = 0;
+
     static Tree* makeRoot(const Range& range);
     friend std::ostream& operator<<(std::ostream&os, const Tree& tree) { tree.print(os); return os; };
 };
 
 class Leaf : public Tree {
 private:
-    std::vector<const Particle*> ps;
 public:
+    std::vector<Particle*> ps;
     Leaf(const Range& range, Node* parent) : Tree(range, parent) {}
 
-    bool add(const Particle& p) override;
+    bool add(Particle& p) override;
     NodeType getType() const override { return NodeType::LEAF; }
     void print(std::ostream& os) const override { os << "Leaf with " << getNrParticles() << " particles in range " << range; }
+    void getForce(Tree* other, double angle, double eps) override;
+    void applyForce(const Vector& force) const override { for (auto& p : ps) p->force += (force+treeParticle.force)*(p->getMass()/treeParticle.getMass()); }
 
-    std::vector<const Particle*> getParticles() const { return ps; }
+    std::vector<Particle*> getParticles() const { return ps; }
     int getNrParticles() const {return ps.size(); }
 
     Vector getForceFrom(const Particle& p, double eps) const {
@@ -358,11 +362,13 @@ public:
     }
     
     ~Node() override { for (auto& child : children) delete child; }
-    bool add(const Particle& p) override { 
+    bool add(Particle& p) override { 
         return children[range.getQuadrant(p.getP())]->add(p); 
     }
     NodeType getType() const override { return NodeType::NODE; }
     void print(std::ostream& os) const override { os << "Node with range " << range; }
+    void getForce(Tree* other, double angle, double eps) override;
+    void applyForce(const Vector& force) const override { for (auto& child : children) child->applyForce((force+treeParticle.force)*(child->treeParticle.getMass()/treeParticle.getMass())); }
 
     void setNewChild(Node* child) { children[range.getQuadrant(child->range)] = child; }
     Tree* getChild(int quadrant) const { return children[quadrant]; }
@@ -377,11 +383,15 @@ public:
 };
 
 
-Particles readIn(string filename, int maxParticles = 1e7) {
+Particles readIn(string filename, int& maxParticles, double everyNth = 1) {
     std::ifstream inputFile(filename);
     if (!inputFile.is_open()) {
         throw std::runtime_error("Could not open file: " + filename);
     }
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dis(1, everyNth);
 
     string line;
     getline(inputFile, line);           // skip first line
@@ -392,15 +402,18 @@ Particles readIn(string filename, int maxParticles = 1e7) {
         std::istringstream iss(line);
         int id; iss >> id;
         double mass; iss >> mass;
-        // std::cout << mass << std::endl;
         Point p; iss >> p.x >> p.y >> p.z;
         Velocity v; iss >> v.x >> v.y >> v.z;
 
-        particles.push_back(Particle(id, mass, p, v, id==0 && mass==1 && p.x==0 && p.y==0 && p.z==0 && v.x==0 && v.y==0 && v.z==0));
+        if (dis(gen) == everyNth) {
+            particles.push_back(Particle(id, mass, p, v, id==0 && mass==1 && p.x==0 && p.y==0 && p.z==0 && v.x==0 && v.y==0 && v.z==0));
+            i++;
+        }
 
-        i++;
         if (i >= maxParticles) break;
     }
+
+    maxParticles = i;
 
     return particles;
 }
@@ -452,25 +465,12 @@ doubles computePoissonErrors(const doubles& shells, const doubles& lambdas) {
 int getHmNr(const Particles& particles) {
     if (!Particle::isSorted()) throw std::runtime_error("Particles not sorted");
 
-    // Particles sorted(particles);
-
-    // std::sort(sorted.begin(), sorted.end(), [](const Particle& p1, const Particle& p2) {
-    //     return p1.getDist() < p2.getDist();
-    // });
-
-    // // TODO could store the sorted sequence!
-
     double totalMass = Particle::getTotalMass();
-
-
     double mass = 0;
     int i=0;
     while (mass < totalMass/2 && i < (int) particles.size()) {
         mass += particles[i++].getMass();
     }
-
-    // std::cout << "Mass: " << mass << std::endl;
-    // std::cout << "i: " << i << std::endl;
 
     /* Particles 0..i-1 have mass < totalMass/2, Particles 0..i have mass >= totalMass/2 */
     return i-1;
@@ -479,35 +479,22 @@ int getHmNr(const Particles& particles) {
 /** @brief calculates the half-mass radius `R_hm` */
 double getRhm(const Particles& particles) {
     int half = getHmNr(particles);
-    // std::cout << "Half: " << half << std::endl;
-    // std::cout << "Dist: " << particles[half].getDist() << std::endl;
     return particles[half].getDist();
-
-    // // TODO could also store after it is calculated once!
-    // // doubles dists;
-    // // for (const auto& p : particles) {
-    // //     dists.push_back(p.getDist());
-    // // }
-    // // nth_element(dists.begin(), dists.begin()+half-1, dists.end());
-    // // return dists[half];
 }
 
-/** @brief calculates the softening `d = (V/N)^(1/3)` */
+/** @brief calculates the softening `d = (V/N)^(1/3)` with  */
 double getSoftening(const Particles& particles) {
     double Rhm = getRhm(particles);
     double V = 4./3 * M_PI * Rhm*Rhm*Rhm;
     int N = getHmNr(particles);
-    // std::cout << "Rhm: " << Rhm << std::endl;
-    // std::cout << "N: " << N << std::endl;
 
     if (N==0) return 0;
     return pow(V/N, 1./3);
 }
 
 /** @brief calculates the direct forces in `O(n^2)`*/
-Vectors getDirectForces(const Particles& particles, double softeningMultiplier=1, bool print=true) {
+Vectors getDirectForces(Particles& particles, double softeningMultiplier=1, bool print=true) {
     double softening = getSoftening(particles)*softeningMultiplier;
-    // std::cout << softening;
 
     if (print) {
         std::cout << "|";
@@ -529,8 +516,6 @@ Vectors getDirectForces(const Particles& particles, double softeningMultiplier=1
 
             Vector force = p1.getForceTo(p2, softening);
 
-
-
             forces[i] += force;
             forces[j] -= force;
         }
@@ -540,6 +525,20 @@ Vectors getDirectForces(const Particles& particles, double softeningMultiplier=1
         std::cout.flush();
     }
     return forces;
+}
+double getTotalEnergy(const Particles& particles) {
+    double energy = 0;
+    for (const Particle& p1 : particles) {
+        energy += p1.getMass() * p1.getV() * p1.getV() / 2.;
+
+        for (const Particle& p2 : particles) {
+            if (p1 == p2) continue;
+            energy -= p1.getMass() * p2.getMass() / p1.getDist(p2);
+            // ! changed to -
+        
+        }
+    }
+    return energy;
 }
 
 /** @brief calculates the analytical forces in `O(n)`
@@ -589,9 +588,7 @@ int getComparisonDirectAnalyticalForce(const Particles& particles, const Vectors
             pI++;
             double openingAngle = cd[pI].openingAngle(-particles[pI].getP());
             double mass = particles[pI].getMass();
-            // consider either only radial component or total force
-            // double force = -cd[pI].dist() * cos(openingAngle);
-            double force = -cd[pI].dist();
+            double force = -cd[pI].dist(); // one could also just consider the radial component (* cos(openingAngle))
 
             sumMass += mass;
             sumForce += force;
@@ -616,19 +613,13 @@ double getTCross(const Particles& particles) {
     double mass_halfMassRadius = Particle::getTotalMass() / 2;
     double v_c = sqrt(G*mass_halfMassRadius/Rhm);
 
-    double t_cross = 2*Rhm / v_c;       // ? calculate for half-mass radius
+    double t_cross = 2*Rhm / v_c;
 
     return t_cross;
 }
 /** @brief calculates the relaxation timescale `t_relax` 
  *  @returns `t_relax = N/(8 ln N) * t_cross` with `t_cross = 2*R_hm / v_c` and `v_c = sqrt(G*M_hm/R_hm)` */
 double getRelaxationTimescale(const Particles& particles) {
-    // // double Rhm = getRhm(particles);
-    // // double mass_halfMassRadius = Particle::getTotalMass() / 2;
-    // // double v_c = sqrt(G*mass_halfMassRadius/Rhm);
-
-    // // double t_cross = 2*Rhm / v_c;       // ? calculate for half-mass radius ?
-
     int N = particles.size();           //  calculate with central obj? no
     double t_relax = N/(8*log(N)) * getTCross(particles);
 
@@ -660,8 +651,21 @@ double Range::openingAngle(Vector p) const {
     double rangeSize = std::max({xmax-xmin, ymax-ymin, zmax-zmin})*std::sqrt(3);
     return 2*std::atan(rangeSize/2/dist);
 }
+
+double Range::openingAngle(const Range& other) const {
+    double mysize = std::max(size, other.size);
+    double dist = std::max(0.00001,(mid-other.mid).dist());
+    double rangeSize = mysize*std::sqrt(3);
+    // double x = std::max(0.,std::max(xmin-other.xmax, other.xmin-xmax));
+    // double y = std::max(0.,std::max(ymin-other.ymax, other.ymin-ymax));
+    // double z = std::max(0.,std::max(zmin-other.zmax, other.zmin-zmax));
+    // double dist = std::sqrt(x*x + y*y + z*z);
+    // double rangeSize = std::max({xmax-xmin, ymax-ymin, zmax-zmin, other.xmax-other.xmin, other.ymax-other.ymin, other.zmax-other.zmin})*std::sqrt(3)/2.; // ? could be less, could be calculated beforehand
+    return 2*std::atan(rangeSize/dist); // make it comparable to the openingAngle(Vector p) by using 2.5
+}
     
-// double Range::openingAngle(Vector p) const {
+// /** more accurate, slower version. */
+// double Range::openingAngle2(Vector p) const {
 //    if (contains(p)) return 2*M_PI;
 
 //    // approximative, but fast solution
@@ -679,13 +683,12 @@ double Range::openingAngle(Vector p) const {
 
 //    double rad = 0;
 //    for (const Vector& pos : poss) {
-//        rad = std::max(rad, openingAngle(mid-p, pos-p));
+//        rad = std::max(rad, openingAngle2(mid-p, pos-p));
 //    }
 
 //    return 2*rad; /* note that rad is half of the opening angle */
 // }
 
-// ? why not static
 Range Range::containingBox(const Particles& particles) {
     double xmin=particles[0].getP().x, xmax=particles[0].getP().x;
     double ymin=particles[0].getP().y, ymax=particles[0].getP().y;
@@ -698,7 +701,8 @@ Range Range::containingBox(const Particles& particles) {
         zmin = std::min(zmin, p.getP().z);
         zmax = std::max(zmax, p.getP().z);
     }
-    return Range(xmin, xmax, ymin, ymax, zmin, zmax);
+    double maxV = max(-xmin, xmax, -ymin, ymax, -zmin, zmax);
+    return Range(-maxV, maxV, -maxV, maxV, -maxV, maxV);
 }
 
 
@@ -712,12 +716,63 @@ Range Range::containingBox(const Particles& particles) {
     |  0  |  1  | /
     |_____|_____|/
 */
+void Leaf::getForce(Tree* other, double angle, double eps) {
+    if (treeParticle.getMass() == 0 || other->treeParticle.getMass() == 0) return;
+    if (range.openingAngle(other->getRange()) <= angle) {
+        treeParticle.setForceTo(other->treeParticle, eps);
+        return;
+    }
+
+    if (other->getType() == NodeType::LEAF) {
+        Leaf* leaf = dynamic_cast<Leaf*>(other);
+        uint i=0;
+        for (auto& p2 : leaf->ps) {
+            for (uint j=((*leaf == *this) ? i+1 : 0); j<ps.size(); j++) {
+                auto& p1 = ps[j];
+
+                p1->setForceTo(*p2, eps);
+            }
+            i++;
+        }
+    } else {
+        Node* node = dynamic_cast<Node*>(other);
+        for (int i=0; i<8; i++) {
+            getForce(node->getChild(i), angle, eps);
+        }
+    }
+}
+
+void Node::getForce(Tree* other, double angle, double eps) {
+    if (range.openingAngle(other->getRange()) <= angle) {
+        treeParticle.setForceTo(other->treeParticle, eps);
+        return;
+    }
+
+    /* same node */
+    if (*other == *this) {
+        Node* otherNode = dynamic_cast<Node*>(other);
+        for (int i=0; i<8; i++) {
+            for (int j=i; j<8; j++) {
+                children[i]->getForce(otherNode->getChild(j), angle, eps);
+            }
+        }
+        return;
+    } /* two different nodes */
+    else {
+        for (int i=0; i<8; i++) {
+            other->getForce(children[i], angle, eps);
+        }
+    }
+}
+
+
+
 Tree* Tree::makeRoot(const Range& range) {
     return new Node(range, nullptr);
 }
 
 
-bool Leaf::add(const Particle& p) {
+bool Leaf::add(Particle& p) {
     ps.push_back(&p);
     if (ps.size() > 8) {
         /* upgrade from Leaf to Node */
@@ -747,23 +802,24 @@ int treeTest(const Tree* tree) {
         return sum;
     }
 }
-Tree* getTree(const Particles& particles, bool print) {
+Tree* getTree(Particles& particles, bool print) {
     Range range = Range::containingBox(particles);
-    for (const auto& p : particles) { // comment out for speed
+    for (const auto& p : particles) {
         if (!range.contains(p.getP())) throw std::runtime_error("Particle not in range");
     }
 
     if (print) paddedPrint(" Creating tree...",'.');
 
     Tree* root = Tree::makeRoot(range);
-    for (const auto& p : particles) {
+    for (auto& p : particles) {
+        if (p.id==1192) std::cout << "Adding particle " << p << " " << &p << std::endl;
         root->add(p);
     }
     if (print) paddedPrint(" Added all particles...",'.');
     return root;
 }
 
-Treeparticle computeTreeCodeMasses(Tree* tree) {                // could be made const again and put into tree class??
+Treeparticle computeTreeCodeMasses(Tree* tree) {
     if (tree->getType() == NodeType::LEAF) {
         Leaf* leaf = dynamic_cast<Leaf*>(tree);
         for (const auto& p : leaf->getParticles()) {
@@ -785,24 +841,13 @@ Vector getForceRec(const Particle& p, const Tree* tree, double angle, double eps
     if (tree->treeParticle.getMass() == 0) return Vector{0,0,0};
 
     if (tree->getRange().openingAngle(p.getP()) > angle) {
-        // Vector force{0,0,0};
         if (tree->getType() == NodeType::LEAF) {
             const Leaf* leaf = dynamic_cast<const Leaf*>(tree);
             return leaf->getForceFrom(p, eps);
-            // for (const auto& p2 : leaf->getParticles()) {
-            //     if (p == *p2) {
-            //         continue;
-            //     }
-            //     force += p.getForceTo(*p2, eps);
-            // }
         } else {
             const Node* node = dynamic_cast<const Node*>(tree);
             return node->getForceFrom(p, angle, eps);
-            // for (int i=0; i<8; i++) {
-            //     force += getForceRec(p, node->getChild(i), angle, eps);
-            // }
         }
-        // return force;
     }
     else {
         return p.getForceTo(tree->treeParticle, eps);
@@ -810,7 +855,36 @@ Vector getForceRec(const Particle& p, const Tree* tree, double angle, double eps
 
 }
 
-Vectors getTreeCodeForces(const Particles& particles, const Tree* tree, double softeningMultiplier=1, double angleMultiplier=1, bool print=true) {
+void setForces(const Tree* tree, Vectors& vec) {
+    if (tree->getType() == NodeType::LEAF) {
+        const Leaf* leaf = dynamic_cast<const Leaf*>(tree);
+        for (const auto& p : leaf->getParticles()) {
+            vec[p->getId()] = p->force;
+        }
+    } else {
+        const Node* node = dynamic_cast<const Node*>(tree);
+        for (int i=0; i<8; i++) {
+            setForces(node->getChild(i), vec);
+        }
+    }
+}
+
+Vectors getTreeCodeForcesBi(Particles& particles, Tree* tree, double softeningMultiplier=1, double angleMultiplier=1, bool print=true) {
+    double softening = getSoftening(particles)*softeningMultiplier;
+    double angle = M_PI/4 * angleMultiplier; /* 45 degrees */
+    for (auto& p : particles) p.force = Vector{0,0,0};
+
+    
+    tree->getForce(tree, angle, softening);
+    tree->applyForce(Vector{0,0,0});
+
+    Vectors forces;
+    for (const auto& p : particles) forces.push_back(p.force);
+
+    return forces;
+}
+
+Vectors getTreeCodeForcesUni(Particles& particles, Tree* tree, double softeningMultiplier=1, double angleMultiplier=1, bool print=true) {
     double softening = getSoftening(particles)*softeningMultiplier;
     double angle = M_PI/4 * angleMultiplier; /* 45 degrees */
     Vectors forces;
@@ -890,7 +964,7 @@ string formattedDouble(double d, int precision=3) {
 }
 
 template <class TimeitFunctionType, class ... Args>
-auto timeit(const string& name, TimeitFunctionType f, bool print, Args... args) {
+auto timeit(const string& name, TimeitFunctionType f, bool print, Args&... args) {
     if (print) paddedPrint("", '_', ' ');
     if (print) paddedPrint(" FUNCTION " + name + " ", ' ');
     auto t1 = high_resolution_clock::now();
@@ -931,14 +1005,6 @@ double containsValue(const char* s, char** begin, int count, double defa) {
         if (std::strncmp(begin[i],s, std::strlen(s)) == 0) return std::stod(begin[i]+(std::strlen(s)));
     }
     return defa; // default values
-    // // if (std::strcmp(s, "s:") == 0) return 1;
-    // // else if (std::strcmp(s, "a:") == 0) return 1;
-    // // else if (std::strcmp(s, "t:") == 0) return 10;
-    // // else if (std::strcmp(s, "i=") == 0) return 5;
-    // // // else if (std::strcmp(s, "dt=") == 0) return .
-
-    // // std::cerr << "No matching argument found for " << s << std::endl;
-    // // return 0;
 }
 string containsValue(const char* s, char** begin, int count, string defa) {
     for (int i=0; i<count; i++) {
@@ -947,30 +1013,37 @@ string containsValue(const char* s, char** begin, int count, string defa) {
     return defa; // default values
 }
 
-string getFilenameDirect(const string& dataname, int maxParticles, double softeningMult) {
+string getFilenameDirect(const Particles& particles, const string& dataname, uint maxParticles, double softeningMult) {
     std::stringstream sd;
     sd << "bin_vectors-directforce-" << dataname << (maxParticles<1e5 ? "_"+to_string(maxParticles) : "") << "-" << softeningMult << ".bin";
     return sd.str();
 }
-string getFilenameTree(const string& dataname, int maxParticles, double softeningMult, double angleMult) {
+string getFilenameTree(const Particles& particles, const string& dataname, uint maxParticles, double softeningMult, double angleMult) {
     std::stringstream st;
     st << "bin_vectors-treecodeforce-" << dataname << (maxParticles<1e5 ? "_"+to_string(maxParticles) : "") << "-" << softeningMult << "-" << angleMult << ".bin";
     return st.str();
 }
 
 
-Vectors getCDVectors(const Particles& particles, const string& dataname, int maxParticles, double softeningMult, bool loadcd, bool print) {
+Vectors getCDVectors(Particles& particles, const string& dataname, uint maxParticles, double softeningMult, bool loadcd, bool print) {
     Vectors cd;
-    string filenameDirect = getFilenameDirect(dataname, maxParticles, softeningMult);
+    string filenameDirect = getFilenameDirect(particles, dataname, maxParticles, softeningMult);
     if (loadcd) loadVectorsFromFile(cd, filenameDirect);
     else {cd = timeit(filenameDirect, getDirectForces, print, particles, softeningMult, print); saveVectorsToFile(cd, filenameDirect);}
     return cd;
 }
-Vectors getCTVectors(const Particles& particles, const string& dataname, int maxParticles, const Tree* root, double softeningMult, double angleMult, bool loadct, bool print) {
+Vectors getCTVectors(Particles& particles, const string& dataname, uint maxParticles, Tree* root, double softeningMult, double angleMult, bool loadct, bool print, bool treeCodeUnidir) {
     Vectors ct;
-    string filenameTree = getFilenameTree(dataname, maxParticles, softeningMult, angleMult);
+    string filenameTree = getFilenameTree(particles, dataname, maxParticles, softeningMult, angleMult);
     if (loadct) loadVectorsFromFile(ct, filenameTree);
-    else {ct = timeit(filenameTree, getTreeCodeForces, print, particles, root, softeningMult, angleMult, print); saveVectorsToFile(ct, filenameTree);}
+    else {ct = timeit(filenameTree, (treeCodeUnidir ? getTreeCodeForcesUni : getTreeCodeForcesBi), print, particles, root, softeningMult, angleMult, print); saveVectorsToFile(ct, filenameTree);}
+    return ct;
+}
+Vectors getCTVectors(Particles& particles, const string& dataname, uint maxParticles, double softeningMult, double angleMult, bool loadct, bool print, bool treeCodeUnidir) {
+    Tree* root = getTree(particles, print);
+    computeTreeCodeMasses(root);
+    Vectors ct = getCTVectors(particles, dataname, maxParticles, root, softeningMult, angleMult, loadct, print, treeCodeUnidir);
+    delete root;
     return ct;
 }
 
@@ -998,20 +1071,28 @@ int main(int argc, char* argv[]) {
     string dataname      = containsValue("d:", argv+1, argc-1, "data");
     string dataset       = dataname + ".txt";
     int maxParticles     = containsValue("n:", argv+1, argc-1, 1e5);
-    Particles particles  = readIn(dataset, maxParticles);
+    double everyNth      = containsValue("nth:", argv+1, argc-1, 1);
+    Particles particles  = readIn(dataset, maxParticles, everyNth);
     
     double softeningMult = containsValue("s:", argv+1, argc-1, 1);
     double angleMult     = containsValue("a:", argv+1, argc-1, 1);
     double timeMult      = containsValue("t:", argv+1, argc-1, 10);
     double solverImgs    = containsValue("i:", argv+1, argc-1, 5);
-    // double dt            = containsValue("dt=", argv+1, argc-1);
+
     bool loadcd          = contains("loadcd", argv+1, argc-1);
     bool loadct          = contains("loadct", argv+1, argc-1);
+    bool gravityTree     = contains("gravityTreeSolver", argv+1, argc-1);
+    bool gravityDirect   = contains("gravityDirectSolver", argv+1, argc-1);
     bool printComp       = contains("printComp", argv+1, argc-1);
     bool printFunc       = contains("printFunc", argv+1, argc-1);
+    bool treeCodeUnidir  = contains("treeCodeUnidir", argv+1, argc-1); // treeCodeUnidirect: for each particle, compute force from tree
+                                                                       // treeCodeBidirect:  compute all forces inside tree
 
     boxedPrint(" SORTING PARTICLES ");
     Particle::sortParticles(particles);
+
+    // std::cout << " " << getTCross(particles) << std::endl;
+    // return 0;
 
     //* TESTING DATA INTEGRITY
     if (contains("test", argv+1, argc-1)) {
@@ -1099,16 +1180,65 @@ int main(int argc, char* argv[]) {
         if (contains("test", argv+1, argc-1)) treeTest(root);   // some test to see if the tree was built correctly
         paddedPrint("", '_');
 
-        // // Vectors cd, ct;                                         // load or compute direct and tree-code forces
-        // // string filenameDirect = getFilenameDirect(dataname, maxParticles, softeningMult);
-        // // string filenameTree = getFilenameTree(dataname, maxParticles, softeningMult, angleMult);
-        // // if (loadcd) loadVectorsFromFile(cd, filenameDirect);
-        // // else {cd = timeit(filenameDirect, getDirectForces, particles, softeningMult, true); saveVectorsToFile(cd, filenameDirect);}
 
-        // // if (loadct) loadVectorsFromFile(ct, filenameTree);
-        // // else {ct = timeit(filenameTree, getTreeCodeForces, particles, root, softeningMult, angleMult, true); saveVectorsToFile(ct, filenameTree);}
+
+        Node* parent = dynamic_cast<Node*>(root);
+        int i=0;
+        Tree* node = parent->getChild(0);
+        Leaf* leaf;
+
+        while (true) {
+            if (node->getType() == NodeType::NODE) {
+                parent = dynamic_cast<Node*>(node);
+                node = parent->getChild(0);
+                i=0;
+            } else {
+                leaf = dynamic_cast<Leaf*>(node);
+                while (leaf->getParticles().size() == 0) {
+                    if (parent->getChild(++i)->getType() == NodeType::LEAF) {
+                        leaf = dynamic_cast<Leaf*>(parent->getChild(i));
+                    } else {
+                        node = parent->getChild(i);
+                        break;
+                    }
+                }
+                if (leaf->getParticles().size() > 0) break;
+                
+            }
+        }
+
+
+
+        // while (node->getChild(0)->getType() == NodeType::NODE) {
+        //     node = dynamic_cast<Node*>(node->getChild(0));
+        // }
+        // Leaf* leaf = dynamic_cast<Leaf*>(node->getChild(0));
+        // int i=0;
+        // while (leaf->getParticles().size() == 0) {
+        //     leaf = dynamic_cast<Leaf*>(node->getChild(++i));
+        // }
+        std::cout << *(leaf->ps[0]) << std::endl;
+        std::cout << leaf->ps[0] << std::endl;
+
+        // std::cout << particles[11999] << std::endl;
+        
+        // particles[11999].id = 42;
+
+        // std::cout << *(leaf->ps[0]) << std::endl;
+        // std::cout << particles[11999] << std::endl;
+
+        // std::cout << 
+
+
+
+
         Vectors cd = getCDVectors(particles, dataname, maxParticles, softeningMult, loadcd, printFunc);
-        Vectors ct = getCTVectors(particles, dataname, maxParticles, root, softeningMult, angleMult, loadct, printFunc);
+        Vectors ct = getCTVectors(particles, dataname, maxParticles, root, softeningMult, angleMult, loadct, printFunc, treeCodeUnidir);
+
+        std::cout << leaf->ps[0]->force << std::endl;
+        std::cout << leaf->ps[0] << std::endl;
+        std::cout << particles[1192].force << std::endl;
+        std::cout << &particles[1192] << std::endl;
 
         compareForces(cd, ct, softeningMult, angleMult, printComp); // compare direct and tree-code forces that were computed or loaded
 
@@ -1119,7 +1249,7 @@ int main(int argc, char* argv[]) {
                 Vectors cd = getCDVectors(particles, dataname, maxParticles, soft, loadcd, printFunc);
                 for (double angle : doubles{.1,.3,1,3}) {
 
-                    Vectors ct = getCTVectors(particles, dataname, maxParticles, root, soft, angle, loadct, printFunc);
+                    Vectors ct = getCTVectors(particles, dataname, maxParticles, root, soft, angle, loadct, printFunc, treeCodeUnidir);
                     compareForces(cd, ct, soft, angle, printComp);
 
                 }
@@ -1129,8 +1259,9 @@ int main(int argc, char* argv[]) {
         delete root;
     }
 
-    if (contains("gravityTreeSolver", argv+1, argc-1)) {
-        boxedPrint(" GRAVITY TREE SOLVER ");
+    if (gravityDirect || gravityTree) {
+        if (gravityDirect) boxedPrint(" GRAVITY DIRECT SOLVER ");
+        else boxedPrint(" GRAVITY TREE SOLVER ");
         // t_cross = .1167 for data0, .1182 for data1, .0001 for data, 0 for dataEarth
 
         double timescale = getTCross(particles) * timeMult;
@@ -1141,36 +1272,28 @@ int main(int argc, char* argv[]) {
         clearMyPlot(filename);
 
 
+        Vectors forces;
         Particle::sortParticles(particles);
-        Vectors forces = getCDVectors(particles, dataname+"-tLFstart"+str(0)+"-"+str(dt), maxParticles, softeningMult, loadcd, printFunc);
+        if (gravityDirect) forces = getCDVectors(particles, dataname+"-tLFstart"+str(0)+"-"+str(dt), maxParticles, softeningMult, loadcd, printFunc);
+        else forces = getCTVectors(particles, dataname+"-tLFstart"+str(0)+"-"+str(dt), maxParticles, softeningMult, angleMult, loadct, printFunc, treeCodeUnidir);
+
         for (double t=0; t<timescale; t+=dt) {
 
             writePlotToMyPlot(map<Particle,Vector>(particles, [](const Particle& p) {return p.getP();}), filename);
 
+            if (contains("printEnergy", argv+1, argc-1)) std::cout << "Energy: " << getTotalEnergy(particles) << std::endl;
+
             for (Particle& p : particles) p.setApplyLeapFrog1(forces[p.getId()], dt);
 
-            // Tree* root = getTree(particles, printFunc);
-            // computeTreeCodeMasses(root);
-            // Vectors forces = getCTVectors(particles, dataname+"-t"+str(t), maxParticles, root, softeningMult, angleMult, loadct, printFunc);
             Particle::sortParticles(particles);
-            forces = getCDVectors(particles, dataname+"-tLF"+str(t)+"-"+str(dt), maxParticles, softeningMult, loadcd, printFunc);
-            for (Particle& p : particles) {
-                p.setApplyLeapFrog2(forces[p.getId()], dt);
-            }
-        }
-        // for (double t=0; t<timescale; t+=dt) {
+            if (gravityDirect) forces = getCDVectors(particles, dataname+"-tLFstart"+str(t)+"-"+str(dt), maxParticles, softeningMult, loadcd, printFunc);
+            else forces = getCTVectors(particles, dataname+"-tLFstart"+str(t)+"-"+str(dt), maxParticles, softeningMult, angleMult, loadct, printFunc, treeCodeUnidir);
 
-        //     Particle::sortParticles(particles);
-        //     writePlotToMyPlot(map<Particle,Vector>(particles, [](const Particle& p) {return p.getP();}), filename);
-        //     // Tree* root = getTree(particles, printFunc);
-        //     // computeTreeCodeMasses(root);
-        //     // Vectors forces = getCTVectors(particles, dataname+"-t"+str(t), maxParticles, root, softeningMult, angleMult, loadct, printFunc);
-        //     Vectors forces = getCDVectors(particles, dataname+"-t"+str(t), maxParticles, softeningMult, loadcd, printFunc);
-        //     for (Particle& p : particles) {
-        //         p.setApplyForce(forces[p.getId()], dt);
-        //     }
-        // }
+            for (Particle& p : particles) p.setApplyLeapFrog2(forces[p.getId()], dt);
+        }
+
         writePlotToMyPlot(map<Particle,Vector>(particles, [](const Particle& p) {return p.getP();}), filename);
+        if (contains("printEnergy", argv+1, argc-1)) std::cout << "Energy: " << getTotalEnergy(particles) << std::endl;
 
         runPython(filename);
     }
@@ -1253,6 +1376,13 @@ std::vector<T2> map(const std::vector<T1>& xs, std::function<T2(T1)> f) {
     std::vector<T2> ys;
     std::transform(xs.begin(), xs.end(), std::back_inserter(ys), f);
     return ys;
+}
+
+
+double max(double val) { return val; }
+template <typename... Args>
+double max(double first, Args... ds) {
+    return std::max(first, max(ds...));
 }
 
 void runPython(string filename) {
